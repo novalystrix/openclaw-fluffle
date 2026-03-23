@@ -69,8 +69,8 @@ export class FluffleApi {
     return { id: data.message.id };
   }
 
-  async getGroups(): Promise<Array<{ id: string; title: string; team_id: string }>> {
-    const data = await this.request<{ groups: Array<{ group_id?: string; id?: string; title: string; team_id: string }> }>(
+  async getGroups(): Promise<Array<{ id: string; title: string; team_id: string; team_name: string }>> {
+    const data = await this.request<{ groups: Array<{ group_id?: string; id?: string; title: string; team_id: string; team_name?: string }> }>(
       `/api/agents/${this.agentId}/groups`,
     );
     // Normalize: API returns group_id, plugin expects id
@@ -78,6 +78,7 @@ export class FluffleApi {
       id: g.group_id ?? g.id ?? "",
       title: g.title,
       team_id: g.team_id,
+      team_name: g.team_name ?? g.team_id,
     }));
   }
 

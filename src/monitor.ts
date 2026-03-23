@@ -53,6 +53,9 @@ function markMessageProcessed(id: string): boolean {
 const contextCache = new Map<string, { fetchedAt: number; digest: string }>();
 const CONTEXT_CACHE_TTL_MS = 300_000; // 5min
 
+// Group/team name cache (populated from getGroups on startup + refreshes)
+const groupNameCache = new Map<string, { title: string; teamId: string; teamName: string }>();
+
 export type FluffleMonitorOptions = {
   account: ResolvedFluffleAccount;
   config: OpenClawConfig;
@@ -174,16 +177,11 @@ async function processMessage(
     return;
   }
 
-  // Target filtering: if the server specified target_agent_ids, only process if we're targeted
-  const myAgentId = account.config.agentId;
-  if (message.targetAgentIds && message.targetAgentIds.length > 0) {
-    if (!message.targetAgentIds.includes(myAgentId)) {
-      runtime.log?.(`[fluffle] processMessage: not targeted (targets=${message.targetAgentIds.join(',')}), skipping`);
-      return;
-    }
-  }
+  // Note: target_agent_ids is informational context — the server controls delivery
+  // via agent-specific channels. On group channels, we process all messages so the
+  // orchestrator sees everything. The server decides who to notify, not the plugin.
 
-  runtime.log?.(`[fluffle] processMessage: from=${message.senderName} content="${message.content?.slice(0, 50)}" groupId=${message.groupId} targeted=${message.targetAgentIds?.includes(myAgentId) ?? 'all'} fileId=${message.fileId ?? "none"} fileName=${message.fileName ?? "none"}`);
+  runtime.log?.(`[fluffle] processMessage: from=${message.senderName} content="${message.content?.slice(0, 50)}" groupId=${message.groupId} fileId=${message.fileId ?? "none"} fileName=${message.fileName ?? "none"}`);
 
   const pairing = createScopedPairingAccess({
     core,
@@ -337,9 +335,29 @@ async function processMessage(
     }
   }
 
+  // Resolve team + group names for context
+  const groupInfo = groupNameCache.get(message.groupId);
+  const teamName = groupInfo?.teamName ?? message.teamId;
+  const groupName = groupInfo?.title ?? message.groupId;
+
+  // Build agent identity context (role, teammates)
+  const agentContextParts: string[] = [];
+  if (message.recipientAgent?.role) {
+    agentContextParts.push(`[Your Role] ${message.recipientAgent.role}`);
+  }
+  if (message.teammates?.length) {
+    const teammateList = message.teammates
+      .map(t => `  - ${t.name}${t.role ? ` (${t.role})` : ''}`)
+      .join('\n');
+    agentContextParts.push(`[Team Members in this group]\n${teammateList}`);
+  }
+  const agentContext = agentContextParts.length ? agentContextParts.join('\n') + '\n\n' : '';
+
   // Prepend playbook + context if available
   const cachedPlaybook = playbookCache.get(message.teamId);
   const contextPrefix = [
+    `[Fluffle Context] Team: "${teamName}" | Channel: #${groupName}`,
+    agentContext,
     teamContextBlock,
     playbookContent ? `[Team Playbook - v${cachedPlaybook?.version ?? '?'}]\n${playbookContent}\n[End Playbook]` : "",
   ].filter(Boolean).join("\n\n");
@@ -770,6 +788,12 @@ async function startPusherListener(
       const groups = await api.getGroups();
       let newCount = 0;
       for (const group of groups) {
+        // Cache group/team names for envelope context
+        groupNameCache.set(group.id, {
+          title: group.title ?? group.id,
+          teamId: group.team_id,
+          teamName: (group as any).team_name ?? group.team_id,
+        });
         if (!subscribedGroups.has(group.id)) {
           subscribeToGroup(group.id, group.team_id);
           newCount++;
