@@ -145,6 +145,7 @@ function parseWebhookPayload(payload: WebhookPayload): FluffleInboundMessage {
     id: payload.message.id,
     groupId: payload.group_id,
     teamId: payload.team_id,
+    teamName: (payload as any).team_name || undefined,
     senderId: payload.message.sender.id ?? "",
     senderName: payload.message.sender.name ?? "",
     senderType: payload.message.sender.type,
@@ -365,7 +366,7 @@ async function processMessage(
 
   // Resolve team + group names for context
   const groupInfo = groupNameCache.get(message.groupId);
-  const teamName = groupInfo?.teamName ?? message.teamId;
+  const teamName = groupInfo?.teamName ?? message.teamName ?? message.teamId;
   const groupName = groupInfo?.title ?? message.groupId;
 
   // Build agent identity context (teammates only — no roles in v2)
@@ -450,6 +451,7 @@ async function processMessage(
     ConversationLabel: fromLabel,
     GroupSubject: groupName !== message.groupId ? groupName : undefined,
     GroupChannel: groupName !== message.groupId ? groupName : undefined,
+    GroupTeam: teamName !== message.teamId ? teamName : undefined,
     ...(participantNames.length ? { GroupParticipants: participantNames } : {}),
     SenderName: message.senderName || undefined,
     SenderId: message.senderId,
@@ -726,6 +728,7 @@ async function startPusherListener(
           id: msg.id ?? "",
           groupId: msg.group_id ?? "",
           teamId: msg.team_id ?? "",
+          teamName: (msg as any).team_name || undefined,
           senderId: msg.sender_user_id ?? msg.sender_agent_id ?? "",
           senderName: msg.sender_name ?? "",
           senderType: (msg.sender_agent_id ? "agent" : (msg.sender_type ?? "user")) as "agent" | "user",
@@ -823,6 +826,7 @@ async function startPusherListener(
         id: data.id ?? "",
         groupId: data.group_id ?? "",
         teamId: data.team_id ?? "",
+        teamName: data.team_name || undefined,
         senderId: data.sender_user_id ?? data.sender_agent_id ?? data.sender_id ?? "",
         senderName: data.sender_name ?? "",
         senderType: data.sender_agent_id ? "agent" : "user",
@@ -864,6 +868,7 @@ async function startPusherListener(
         id: data.id ?? "",
         groupId: groupId,
         teamId: data.team_id ?? teamId ?? "",
+        teamName: data.team_name || undefined,
         senderId: data.sender_user_id ?? data.sender_agent_id ?? data.sender_id ?? data.sender?.id ?? "",
         senderName: data.sender_name ?? data.sender?.name ?? "",
         senderType: data.sender_agent_id ? "agent" : (data.sender_type ?? "user"),
@@ -1074,6 +1079,7 @@ async function startSocketIOListener(
           id: msg.id ?? "",
           groupId: msg.group_id ?? "",
           teamId: msg.team_id ?? "",
+          teamName: (msg as any).team_name || undefined,
           senderId: msg.sender_user_id ?? msg.sender_agent_id ?? "",
           senderName: msg.sender_name ?? "",
           senderType: (msg.sender_agent_id ? "agent" : (msg.sender_type ?? "user")) as "agent" | "user",
@@ -1180,6 +1186,7 @@ async function startSocketIOListener(
         id: data.id ?? "",
         groupId: data.group_id ?? "",
         teamId: data.team_id ?? "",
+        teamName: data.team_name || undefined,
         senderId: data.sender_user_id ?? data.sender_agent_id ?? data.sender?.id ?? "",
         senderName: data.sender_name ?? data.sender?.name ?? "",
         senderType: data.sender_agent_id ? "agent" : (data.sender_type ?? "user"),
@@ -1351,6 +1358,7 @@ async function startPollingListener(
           id: msg.id ?? "",
           groupId: msg.group_id ?? "",
           teamId: msg.team_id ?? "",
+          teamName: (msg as any).team_name || undefined,
           senderId: msg.sender_user_id ?? msg.sender_agent_id ?? "",
           senderName: msg.sender_name ?? "",
           senderType: (msg.sender_agent_id ? "agent" : (msg.sender_type ?? "user")) as "agent" | "user",

@@ -86,6 +86,7 @@ export type FluffleInboundMessage = {
   id: string;
   groupId: string;
   teamId: string;
+  teamName?: string;
   senderId: string;
   senderName: string;
   senderType: "agent" | "user";
