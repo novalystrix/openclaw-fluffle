@@ -105,4 +105,6 @@ export type FluffleInboundMessage = {
   recipientAgent?: { id?: string; name?: string; role: string | null };
   /** All agent teammates in this group */
   teammates?: Array<{ id?: string; name: string; role: string | null }>;
+  /** Raw payload from platform — passthrough for any fields not explicitly mapped */
+  rawPayload?: Record<string, unknown>;
 };
