@@ -169,6 +169,7 @@ function parseWebhookPayload(payload: WebhookPayload): FluffleInboundMessage {
       ? { id: payload.recipient_agent.id, name: payload.recipient_agent.name, role: payload.recipient_agent.role }
       : undefined,
     teammates: payload.teammates,
+    rawPayload: payload as unknown as Record<string, unknown>,
   };
 }
 
@@ -256,7 +257,16 @@ async function processMessage(
   // Fluffle groups are always group chats; DMs are 1:1 groups
   // We treat all messages as group context since Fluffle is group-based
   const isGroup = true;
-  const rawBody = message.content.trim();
+  let rawBody = message.content.trim();
+
+  // Prepend reply context so the agent sees what message was replied to
+  if (message.replyTo && message.replyTo.content) {
+    const quoteSender = message.replyTo.senderName || 'someone';
+    const quoteContent = message.replyTo.content.length > 300
+      ? message.replyTo.content.slice(0, 300) + '…'
+      : message.replyTo.content;
+    rawBody = `[Replying to ${quoteSender}: "${quoteContent}"]\n${rawBody}`;
+  }
 
   // ── Playbook cache: fetch if version changed ────────────────────────────
   let playbookContent: string | undefined;
@@ -438,6 +448,26 @@ async function processMessage(
     }
   }
 
+  // Build fluffle-specific metadata from raw payload for passthrough
+  const fluffleMetadata: Record<string, unknown> = {};
+  if (message.rawPayload) {
+    const rp = message.rawPayload as Record<string, unknown>;
+    // Flatten top-level payload fields (excluding 'message' which is already parsed)
+    for (const [k, v] of Object.entries(rp)) {
+      if (k === 'message' || k === 'event' || v === undefined || v === null) continue;
+      fluffleMetadata[`fluffle_${k}`] = typeof v === 'object' ? JSON.stringify(v) : v;
+    }
+    // Flatten message sub-fields
+    const msg = rp.message as Record<string, unknown> | undefined;
+    if (msg) {
+      for (const [k, v] of Object.entries(msg)) {
+        if (v === undefined || v === null) continue;
+        if (['id', 'content', 'sender', 'message_type', 'created_at'].includes(k)) continue; // already mapped
+        fluffleMetadata[`fluffle_message_${k}`] = typeof v === 'object' ? JSON.stringify(v) : v;
+      }
+    }
+  }
+
   const ctxPayload = core.channel.reply.finalizeInboundContext({
     Body: body,
     BodyForAgent: rawBody,
@@ -450,8 +480,8 @@ async function processMessage(
     ChatType: "group",
     ConversationLabel: fromLabel,
     GroupSubject: groupName !== message.groupId ? groupName : undefined,
-    GroupChannel: groupName !== message.groupId ? groupName : undefined,
     GroupTeam: teamName !== message.teamId ? teamName : undefined,
+    GroupTeamId: message.teamId || undefined,
     ...(participantNames.length ? { GroupParticipants: participantNames } : {}),
     SenderName: message.senderName || undefined,
     SenderId: message.senderId,
@@ -463,6 +493,7 @@ async function processMessage(
     OriginatingTo: `fluffle:${message.groupId}`,
     ...(resolvedMediaUrl ? { MediaUrl: resolvedMediaUrl, NumMedia: "1" } : {}),
     ...(resolvedMediaType ? { MediaType: resolvedMediaType } : {}),
+    ...fluffleMetadata,
   });
 
   runtime.log?.(`[fluffle] processMessage: ctxPayload created, SessionKey=${ctxPayload.SessionKey}`);
@@ -816,6 +847,7 @@ async function startPusherListener(
         message: data.message,
         recipient_agent: data.recipient_agent,
         teammates: data.teammates,
+        rawPayload: data as unknown as Record<string, unknown>,
         target_agent_ids: data.target_agent_ids,
         target_agent_names: data.target_agent_names,
         playbook: data.playbook,
@@ -840,6 +872,7 @@ async function startPusherListener(
         targetAgentIds: data.target_agent_ids,
         targetAgentNames: data.target_agent_names,
         teammates: data.teammates,
+        rawPayload: data as unknown as Record<string, unknown>,
       };
     } else {
       runtime.log?.(`[fluffle] Pusher agent message: unrecognized shape, skipping`);
@@ -883,6 +916,7 @@ async function startPusherListener(
         targetAgentIds: data.target_agent_ids,
         targetAgentNames: data.target_agent_names,
         teammates: data.teammates,
+        rawPayload: data as unknown as Record<string, unknown>,
       };
       trackMessage(message.id, message.createdAt);
       statusSink?.({ lastInboundAt: Date.now() });
@@ -1174,6 +1208,7 @@ async function startSocketIOListener(
         message: data.message,
         recipient_agent: data.recipient_agent,
         teammates: data.teammates,
+        rawPayload: data as unknown as Record<string, unknown>,
         target_agent_ids: data.target_agent_ids,
         target_agent_names: data.target_agent_names,
         playbook: data.playbook,
@@ -1201,6 +1236,7 @@ async function startSocketIOListener(
         targetAgentIds: data.target_agent_ids,
         targetAgentNames: data.target_agent_names,
         teammates: data.teammates,
+        rawPayload: data as unknown as Record<string, unknown>,
       };
     } else {
       runtime.log?.(`[fluffle/socketio] message:new: unrecognized shape, skipping`);

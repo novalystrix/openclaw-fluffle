@@ -161,6 +161,50 @@ export const flufflePlugin: ChannelPlugin<ResolvedFluffleAccount> = {
       hint: "<groupId>",
     },
   },
+  outbound: {
+    textChunkLimit: 4096,
+    sendText: async ({ cfg, to, text, accountId, deps, replyToId }: any) => {
+      const result = await sendMessageFluffle(to, text);
+      if (!result.ok) throw new Error(result.error ?? "Fluffle send failed");
+    },
+    sendMedia: async ({ cfg, to, text, mediaUrl, mediaLocalRoots, accountId, deps, replyToId }: any) => {
+      // If mediaUrl is a local file path, convert to file:// URL for fetch or read directly
+      let resolvedMediaUrl = mediaUrl;
+      if (mediaUrl && !mediaUrl.startsWith("http") && !mediaUrl.startsWith("data:")) {
+        // Local file — read it and convert to data URL
+        const fs = await import("fs");
+        const path = await import("path");
+        const mime = mediaUrl.endsWith(".png") ? "image/png"
+          : mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".jpeg") ? "image/jpeg"
+          : mediaUrl.endsWith(".gif") ? "image/gif"
+          : mediaUrl.endsWith(".webp") ? "image/webp"
+          : "application/octet-stream";
+        // Try mediaLocalRoots paths too
+        let filePath = mediaUrl;
+        if (!fs.existsSync(filePath) && mediaLocalRoots?.length) {
+          for (const root of mediaLocalRoots) {
+            const candidate = path.join(root, mediaUrl);
+            if (fs.existsSync(candidate)) { filePath = candidate; break; }
+          }
+        }
+        if (fs.existsSync(filePath)) {
+          const buf = fs.readFileSync(filePath);
+          resolvedMediaUrl = `data:${mime};base64,${buf.toString("base64")}`;
+        }
+      }
+      const result = await sendMessageFluffle(to, text || "", resolvedMediaUrl);
+      if (!result.ok) throw new Error(result.error ?? "Fluffle media send failed");
+    },
+    sendPayload: async (ctx: any) => {
+      // Fallback — just send text
+      const text = ctx?.text ?? ctx?.payload?.text ?? "";
+      const to = ctx?.to ?? ctx?.payload?.to ?? "";
+      if (to && text) {
+        const result = await sendMessageFluffle(to, text);
+        if (!result.ok) throw new Error(result.error ?? "Fluffle sendPayload failed");
+      }
+    },
+  },
   gateway: {
     startAccount: async ({ cfg, account, runtime, abortSignal }: any) => {
       runtime.log?.(`[fluffle] startAccount() called, account=${account.accountId}, enabled=${account.enabled}`);
