@@ -168,6 +168,7 @@ function parseWebhookPayload(payload: WebhookPayload): FluffleInboundMessage {
       ? { id: payload.recipient_agent.id, name: payload.recipient_agent.name, role: payload.recipient_agent.role }
       : undefined,
     teammates: payload.teammates,
+    rawPayload: payload as unknown as Record<string, unknown>,
   };
 }
 
@@ -437,6 +438,33 @@ async function processMessage(
     }
   }
 
+  // ── Build passthrough metadata from raw payload ────────────────────────
+  // Any fields the platform sends that aren't explicitly mapped above
+  // get forwarded as FluffleExtra_* so new platform fields work without
+  // a plugin update.
+  const passthroughMeta: Record<string, string> = {};
+  if (message.rawPayload) {
+    // Known fields already mapped into the OpenClaw envelope — skip these
+    const MAPPED_KEYS = new Set([
+      "event", "message", "group_id", "team_id",
+      "recipient_agent", "teammates", "target_agent_ids",
+      "target_agent_names", "playbook",
+      // flat-shape keys
+      "id", "content", "sender_user_id", "sender_agent_id", "sender_id",
+      "sender_name", "sender_type", "sender", "message_type", "created_at",
+      "reply_to", "file_id", "file_name", "file_mime_type",
+    ]);
+    for (const [key, value] of Object.entries(message.rawPayload)) {
+      if (MAPPED_KEYS.has(key)) continue;
+      if (value === undefined || value === null) continue;
+      // Convert to string for the envelope
+      const strValue = typeof value === "string" ? value : JSON.stringify(value);
+      // PascalCase the key for consistency (e.g. team_name → TeamName)
+      const envKey = key.replace(/(^|_)([a-z])/g, (_, __, c) => c.toUpperCase());
+      passthroughMeta[`Fluffle${envKey}`] = strValue;
+    }
+  }
+
   const ctxPayload = core.channel.reply.finalizeInboundContext({
     Body: body,
     BodyForAgent: rawBody,
@@ -450,6 +478,8 @@ async function processMessage(
     ConversationLabel: fromLabel,
     GroupSubject: groupName !== message.groupId ? groupName : undefined,
     GroupChannel: groupName !== message.groupId ? groupName : undefined,
+    GroupTeam: teamName !== message.teamId ? teamName : undefined,
+    GroupTeamId: message.teamId || undefined,
     ...(participantNames.length ? { GroupParticipants: participantNames } : {}),
     SenderName: message.senderName || undefined,
     SenderId: message.senderId,
@@ -461,6 +491,7 @@ async function processMessage(
     OriginatingTo: `fluffle:${message.groupId}`,
     ...(resolvedMediaUrl ? { MediaUrl: resolvedMediaUrl, NumMedia: "1" } : {}),
     ...(resolvedMediaType ? { MediaType: resolvedMediaType } : {}),
+    ...passthroughMeta,
   });
 
   runtime.log?.(`[fluffle] processMessage: ctxPayload created, SessionKey=${ctxPayload.SessionKey}`);
@@ -736,6 +767,7 @@ async function startPusherListener(
           fileId: (msg as any).file_id ?? null,
           fileName: (msg as any).file_name ?? null,
           fileMimeType: (msg as any).file_mime_type ?? null,
+          rawPayload: msg as Record<string, unknown>,
         };
         trackMessage(msg.id, msg.created_at);
         statusSink?.({ lastInboundAt: Date.now() });
@@ -878,6 +910,7 @@ async function startPusherListener(
         targetAgentIds: data.target_agent_ids,
         targetAgentNames: data.target_agent_names,
         teammates: data.teammates,
+          rawPayload: data as Record<string, unknown>,
       };
       trackMessage(message.id, message.createdAt);
       statusSink?.({ lastInboundAt: Date.now() });
@@ -922,6 +955,7 @@ async function startPusherListener(
         fileId: null,
         fileName: null,
         fileMimeType: null,
+          rawPayload: data as Record<string, unknown>,
       };
       trackMessage(message.id, message.createdAt);
       statusSink?.({ lastInboundAt: Date.now() });
@@ -1084,6 +1118,7 @@ async function startSocketIOListener(
           fileId: (msg as any).file_id ?? null,
           fileName: (msg as any).file_name ?? null,
           fileMimeType: (msg as any).file_mime_type ?? null,
+          rawPayload: msg as Record<string, unknown>,
         };
         trackMessage(msg.id, msg.created_at);
         statusSink?.({ lastInboundAt: Date.now() });
@@ -1237,6 +1272,7 @@ async function startSocketIOListener(
       fileId: null,
       fileName: null,
       fileMimeType: null,
+          rawPayload: data as Record<string, unknown>,
     };
     trackMessage(message.id, message.createdAt);
     statusSink?.({ lastInboundAt: Date.now() });
@@ -1361,6 +1397,7 @@ async function startPollingListener(
           fileId: (msg as any).file_id ?? null,
           fileName: (msg as any).file_name ?? null,
           fileMimeType: (msg as any).file_mime_type ?? null,
+          rawPayload: msg as Record<string, unknown>,
         };
         trackMessage(msg.id, msg.created_at);
         statusSink?.({ lastInboundAt: Date.now() });
