@@ -80,6 +80,7 @@ export type WebhookPayload = {
   target_agent_ids?: string[];
   target_agent_names?: string[];
   playbook?: { version: number };
+  [key: string]: unknown;
 };
 
 export type FluffleInboundMessage = {

@@ -389,10 +389,42 @@ async function processMessage(
   }
   const agentContext = agentContextParts.length ? agentContextParts.join('\n') + '\n\n' : '';
 
+  // Build dynamic context header from rawPayload
+  const fluffleContextHeader = (() => {
+    const SECURITY_RE = /secret|key|token|password|auth/i;
+    const SKIP_FIELDS = new Set(['message', 'event', 'team_id', 'team_name', 'group_id', 'teammates', 'playbook']);
+    const header = `[Fluffle Context] Team: "${teamName}" | Channel: #${groupName}`;
+    const metaLines: string[] = [];
+
+    for (const [field, value] of Object.entries(message.rawPayload ?? {})) {
+      if (SKIP_FIELDS.has(field)) continue;
+      if (SECURITY_RE.test(field)) continue;
+      if (value === null || value === undefined) continue;
+
+      if (Array.isArray(value)) {
+        if ((value as unknown[]).length) {
+          metaLines.push(`${field}: [${(value as unknown[]).join(', ')}]`);
+        }
+      } else if (typeof value === 'object') {
+        const subLines = Object.entries(value as Record<string, unknown>)
+          .filter(([k]) => !SECURITY_RE.test(k))
+          .filter(([, v]) => v !== null && v !== undefined)
+          .map(([k, v]) => `  ${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`);
+        if (subLines.length) {
+          metaLines.push(`${field}:\n${subLines.join('\n')}`);
+        }
+      } else {
+        metaLines.push(`${field}: ${String(value)}`);
+      }
+    }
+
+    return metaLines.length ? `${header}\n${metaLines.join('\n')}` : header;
+  })();
+
   // Prepend playbook + context if available
   const cachedPlaybook = playbookCache.get(message.teamId);
   const contextPrefix = [
-    `[Fluffle Context] Team: "${teamName}" | Channel: #${groupName}`,
+    fluffleContextHeader,
     agentContext,
     teamContextBlock,
     playbookContent ? `[Team Playbook - v${cachedPlaybook?.version ?? '?'}]\n${playbookContent}\n[End Playbook]` : "",
