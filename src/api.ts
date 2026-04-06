@@ -82,11 +82,12 @@ export class FluffleApi {
     }));
   }
 
-  async heartbeat(): Promise<void> {
-    await this.request(`/api/agents/${this.agentId}/heartbeat`, {
+  async heartbeat(): Promise<{ teams: Array<{ team_id: string; team_name: string; role: string | null }>; pending_messages: unknown[] }> {
+    const data = await this.request<{ teams: Array<{ team_id: string; team_name: string; role: string | null }>; pending_messages: unknown[] }>(`/api/agents/${this.agentId}/heartbeat`, {
       method: "POST",
       body: JSON.stringify({ status: "online" }),
     });
+    return data;
   }
 
   /**

@@ -918,6 +918,22 @@ async function startPusherListener(
     });
   });
 
+  // ─── Known teams tracking (populated by heartbeat, used by event handlers) ─
+  const knownTeamIds = new Set<string>();
+
+  // ─── Listen for team invites and playbook updates on agent channel ───────
+  agentChannel.bind("agent:team_invited", async (data: { agentId: string; teamId: string; teamName: string }) => {
+    runtime.log?.('[fluffle] Received team invite: ' + data.teamName);
+    knownTeamIds.add(data.teamId);
+    await refreshGroupSubscriptions();
+  });
+
+  agentChannel.bind("playbook:updated", (data: { teamId: string; version: number }) => {
+    runtime.log?.('[fluffle] Playbook updated for team: ' + data.teamId);
+    playbookCache.delete(data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
   // ─── Dynamic group subscription ──────────────────────────────────────────
   const subscribedGroups = new Set<string>();
 
@@ -1058,11 +1074,25 @@ async function startPusherListener(
     }
   }
 
-  // Heartbeat
-  await api.heartbeat().catch(() => {});
+  // Heartbeat — populate knownTeamIds from initial response
+  const initialHb = await api.heartbeat().catch(() => null);
+  if (initialHb?.teams) {
+    for (const t of initialHb.teams) knownTeamIds.add(t.team_id);
+  }
   const heartbeatInterval = setInterval(async () => {
     try {
-      await api.heartbeat();
+      const hbData = await api.heartbeat();
+      // Check for new teams
+      if (hbData.teams) {
+        const newTeams = hbData.teams.filter(t => !knownTeamIds.has(t.team_id));
+        if (newTeams.length > 0) {
+          for (const t of newTeams) {
+            knownTeamIds.add(t.team_id);
+            runtime.log?.('[fluffle] Discovered new team: ' + (t.team_name || t.team_id));
+          }
+          await refreshGroupSubscriptions();
+        }
+      }
       consecutiveHeartbeatErrors = 0;
     } catch (err) {
       consecutiveHeartbeatErrors++;
@@ -1320,12 +1350,57 @@ async function startSocketIOListener(
     });
   });
 
+  // ─── Listen for team invites and playbook updates ─────────────────────────
+  socket.on('agent:team_invited', async (data: { agentId: string; teamId: string; teamName: string }) => {
+    runtime.log?.('[fluffle/socketio] Received team invite: ' + data.teamName);
+    knownTeamIds.add(data.teamId);
+    await refreshGroupSubscriptions();
+  });
+
+  socket.on('playbook:updated', (data: { teamId: string; version: number }) => {
+    runtime.log?.('[fluffle/socketio] Playbook updated for team: ' + data.teamId);
+    playbookCache.delete(data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
+  // ─── Group refresh helper ───────────────────────────────────────────────────
+  async function refreshGroupSubscriptions() {
+    try {
+      const groups = await api.getGroups();
+      for (const group of groups) {
+        groupNameCache.set(group.id, {
+          title: group.title ?? group.id,
+          teamId: group.team_id,
+          teamName: (group as any).team_name ?? group.team_id,
+        });
+        socket.emit("join", { room: `group:${group.id}` });
+      }
+    } catch (err) {
+      runtime.error?.(`[fluffle/socketio] Group refresh failed: ${String(err)}`);
+    }
+  }
+
   // Heartbeat
-  await api.heartbeat().catch(() => {});
+  const initialHb = await api.heartbeat().catch(() => null);
+  const knownTeamIds = new Set<string>();
+  if (initialHb?.teams) {
+    for (const t of initialHb.teams) knownTeamIds.add(t.team_id);
+  }
   let consecutiveHeartbeatErrors = 0;
   const heartbeatInterval = setInterval(async () => {
     try {
-      await api.heartbeat();
+      const hbData = await api.heartbeat();
+      // Check for new teams
+      if (hbData.teams) {
+        const newTeams = hbData.teams.filter(t => !knownTeamIds.has(t.team_id));
+        if (newTeams.length > 0) {
+          for (const t of newTeams) {
+            knownTeamIds.add(t.team_id);
+            runtime.log?.('[fluffle/socketio] Discovered new team: ' + (t.team_name || t.team_id));
+          }
+          await refreshGroupSubscriptions();
+        }
+      }
       consecutiveHeartbeatErrors = 0;
     } catch (err) {
       consecutiveHeartbeatErrors++;
@@ -1348,19 +1423,7 @@ async function startSocketIOListener(
 
   // Periodic group room refresh
   const groupRefreshInterval = setInterval(async () => {
-    try {
-      const groups = await api.getGroups();
-      for (const group of groups) {
-        groupNameCache.set(group.id, {
-          title: group.title ?? group.id,
-          teamId: group.team_id,
-          teamName: (group as any).team_name ?? group.team_id,
-        });
-        socket.emit("join", { room: `group:${group.id}` });
-      }
-    } catch (err) {
-      runtime.error?.(`[fluffle/socketio] Group refresh failed: ${String(err)}`);
-    }
+    await refreshGroupSubscriptions();
   }, 60_000);
 
   abortSignal.addEventListener(
