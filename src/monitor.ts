@@ -925,12 +925,23 @@ async function startPusherListener(
   agentChannel.bind("agent:team_invited", async (data: { agentId: string; teamId: string; teamName: string }) => {
     runtime.log?.('[fluffle] Received team invite: ' + data.teamName);
     knownTeamIds.add(data.teamId);
+    // TODO: wire CycleEngine — call cycleEngine.start([{ teamId: data.teamId, cadenceMs: ... }]) for newly invited teams
     await refreshGroupSubscriptions();
   });
 
   agentChannel.bind("playbook:updated", (data: { teamId: string; version: number }) => {
     runtime.log?.('[fluffle] Playbook updated for team: ' + data.teamId);
     playbookCache.delete(data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
+  agentChannel.bind("concern:updated", (data: { teamId: string }) => {
+    runtime.log?.('[fluffle] Concern updated for team: ' + data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
+  agentChannel.bind("team:updated", (data: { teamId: string }) => {
+    runtime.log?.('[fluffle] Team settings updated: ' + data.teamId);
     contextCache.delete(data.teamId);
   });
 
@@ -1089,8 +1100,19 @@ async function startPusherListener(
           for (const t of newTeams) {
             knownTeamIds.add(t.team_id);
             runtime.log?.('[fluffle] Discovered new team: ' + (t.team_name || t.team_id));
+            // TODO: wire CycleEngine — call cycleEngine.start([{ teamId: t.team_id, cadenceMs: ... }]) for new teams
           }
           await refreshGroupSubscriptions();
+        }
+      }
+      // Populate dedup set from pending heartbeat messages (catch-up awareness)
+      if ((hbData as any).pending_messages?.length) {
+        const twoMinAgo = Date.now() - 2 * 60 * 1000;
+        for (const msg of (hbData as any).pending_messages as Array<{ id: string; group_id: string; content: string; sender_name: string | null; message_type: string; created_at: string; group_title: string }>) {
+          if (new Date(msg.created_at).getTime() < twoMinAgo) continue;
+          if (processedMessageIds.has(msg.id)) continue;
+          markMessageProcessed(msg.id);
+          runtime.log?.('[fluffle] Catch-up message from heartbeat: ' + msg.id);
         }
       }
       consecutiveHeartbeatErrors = 0;
@@ -1354,12 +1376,23 @@ async function startSocketIOListener(
   socket.on('agent:team_invited', async (data: { agentId: string; teamId: string; teamName: string }) => {
     runtime.log?.('[fluffle/socketio] Received team invite: ' + data.teamName);
     knownTeamIds.add(data.teamId);
+    // TODO: wire CycleEngine — call cycleEngine.start([{ teamId: data.teamId, cadenceMs: ... }]) for newly invited teams
     await refreshGroupSubscriptions();
   });
 
   socket.on('playbook:updated', (data: { teamId: string; version: number }) => {
     runtime.log?.('[fluffle/socketio] Playbook updated for team: ' + data.teamId);
     playbookCache.delete(data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
+  socket.on('concern:updated', (data: { teamId: string }) => {
+    runtime.log?.('[fluffle/socketio] Concern updated for team: ' + data.teamId);
+    contextCache.delete(data.teamId);
+  });
+
+  socket.on('team:updated', (data: { teamId: string }) => {
+    runtime.log?.('[fluffle/socketio] Team settings updated: ' + data.teamId);
     contextCache.delete(data.teamId);
   });
 
@@ -1397,8 +1430,19 @@ async function startSocketIOListener(
           for (const t of newTeams) {
             knownTeamIds.add(t.team_id);
             runtime.log?.('[fluffle/socketio] Discovered new team: ' + (t.team_name || t.team_id));
+            // TODO: wire CycleEngine — call cycleEngine.start([{ teamId: t.team_id, cadenceMs: ... }]) for new teams
           }
           await refreshGroupSubscriptions();
+        }
+      }
+      // Populate dedup set from pending heartbeat messages (catch-up awareness)
+      if ((hbData as any).pending_messages?.length) {
+        const twoMinAgo = Date.now() - 2 * 60 * 1000;
+        for (const msg of (hbData as any).pending_messages as Array<{ id: string; group_id: string; content: string; sender_name: string | null; message_type: string; created_at: string; group_title: string }>) {
+          if (new Date(msg.created_at).getTime() < twoMinAgo) continue;
+          if (processedMessageIds.has(msg.id)) continue;
+          markMessageProcessed(msg.id);
+          runtime.log?.('[fluffle/socketio] Catch-up message from heartbeat: ' + msg.id);
         }
       }
       consecutiveHeartbeatErrors = 0;
