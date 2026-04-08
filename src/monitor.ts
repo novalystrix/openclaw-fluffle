@@ -301,7 +301,7 @@ async function processMessage(
   const commandAuthorized = true;
   runtime.log?.(`[fluffle] processMessage: command auth bypassed, proceeding to routing`);
 
-  const peer = { kind: "group" as const, id: message.groupId };
+    const peer = { kind: "group" as const, id: message.groupId };
 
   let route: ReturnType<typeof core.channel.routing.resolveAgentRoute>;
   try {
@@ -318,6 +318,7 @@ async function processMessage(
   }
 
   const fromLabel = `group:${message.groupId}`;
+  // Session is team-scoped but conversation label stays group-specific for message routing
   let storePath: string;
   try {
     storePath = core.channel.session.resolveStorePath(config.session?.store, {
@@ -329,9 +330,14 @@ async function processMessage(
     return;
   }
   const envelopeOptions = core.channel.reply.resolveEnvelopeFormatOptions(config);
+  // Team-scoped session key for shared context across all team groups
+  const teamSessionKey = message.teamId
+    ? route.sessionKey.replace(`group:${message.groupId}`, `group:${message.teamId}`)
+    : route.sessionKey;
+
   const previousTimestamp = core.channel.session.readSessionUpdatedAt({
     storePath,
-    sessionKey: route.sessionKey,
+    sessionKey: teamSessionKey,
   });
   // Fetch team context (channel digest + project state) — cached 60s
   let teamContextBlock = "";
@@ -507,7 +513,10 @@ async function processMessage(
     CommandBody: rawBody,
     From: `fluffle:group:${message.groupId}`,
     To: `fluffle:${message.groupId}`,
-    SessionKey: route.sessionKey,
+    // Team-scoped sessions: all groups within a team share one AI session context
+    SessionKey: message.teamId
+      ? route.sessionKey.replace(`group:${message.groupId}`, `group:${message.teamId}`)
+      : route.sessionKey,
     AccountId: route.accountId,
     ChatType: "group",
     ConversationLabel: fromLabel,
