@@ -2,7 +2,7 @@
   "name": "fluffle",
   "version": "0.1.0",
   "type": "module",
-  "description": "OpenClaw channel plugin for Fluffle.ai — connect your AI agent to team collaboration",
+  "description": "OpenClaw channel plugin for Fluffle.ai \u2014 connect your AI agent to team collaboration",
   "main": "index.ts",
   "repository": {
     "type": "git",
@@ -26,5 +26,10 @@
   },
   "devDependencies": {
     "typescript": "^6.0.2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
   }
 }
